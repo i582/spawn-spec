@@ -1,0 +1,433 @@
+// This file describes the grammar of the Spawn programming language.
+//
+// This is EBNF-like notation:
+// - `::=` is used to define a rule
+// - `|` is used to define alternatives
+// - `?` is used to define an optional element
+// - `*` is used to define a repetition of zero or more times
+// - `+` is used to define a repetition of one or more times
+// - `()` is used to group elements
+//
+// - rules with an uppercase letter define parser rules
+// - rules with a lowercase letter define lexer rules
+
+File ::= ShebangClause? ModuleClause Import* TopLevelDeclaration*
+
+ShebangClause ::= shebang
+
+ModuleClause ::= Attributes? 'module' identifier semi
+
+// Imports
+Import                      ::= 'import' ImportPath ImportAlias? SelectiveImportList?
+ImportPath                  ::= identifier ('.' identifier)*
+ImportAlias                 ::= 'as' identifier
+SelectiveImportList         ::= '{' SelectiveImportListElements? '}'
+SelectiveImportListElements ::= identifier (',' identifier)* ','?
+
+TopLevelDeclaration ::=
+    ConstDeclaration
+  | ModuleVarDeclaration
+  | TypeAliasDeclaration
+  | UnionDeclaration
+  | FunctionDeclaration
+  | MethodDeclaration
+  | StaticMethodDeclaration
+  | StructDeclaration
+  | EnumDeclaration
+  | InterfaceDeclaration
+  | TestDeclaration
+  | ExternList
+  | Attributes
+
+// Attributes
+Attributes          ::= Attribute (semi Attribute)* semi?
+Attribute           ::= '#[' AttributeExpression ']'
+AttributeExpression ::= AttributeName AttributeValue?
+AttributeName       ::= identifier | 'unsafe' | SelectorExpression // unsafe allowed for `#[unsafe]` functions
+AttributeValue      ::= '(' ArgumentList? ')'
+
+// Constants and module variables
+ConstDeclaration ::= Attributes? ExternHeader? 'pub'? 'comptime'? 'const' ( ConstDefinition | '(' ConstDefinitions? ')' )
+ConstDefinitions ::= ConstDefinition (semi ConstDefinition)* semi?
+ConstDefinition  ::= identifier '=' Expression
+
+ModuleVarDeclaration ::= Attributes? ExternHeader? 'pub'? 'var' ( ModuleVarDefinition | '(' ModuleVarDefinitions? ')' )
+ModuleVarDefinitions ::= ModuleVarDefinition (semi ModuleVarDefinition)* semi?
+ModuleVarDefinition  ::= identifier '=' Expression
+
+// Type aliases and unions
+TypeAliasDeclaration ::= Attributes? ExternHeader? 'pub'? 'type' identifier GenericParameters? WhereConstraints? '=' Type
+
+UnionDeclaration ::= Attributes? 'pub'? 'union' identifier GenericParameters? WhereConstraints? '=' TypeUnionList
+TypeUnionList    ::= Type ( '|' Type)*
+
+ExternHeader ::= 'extern' StringLiteral?
+ExternList   ::= Attributes? ExternHeader '{' (TopLevelDeclaration semi?)* '}'
+
+// Functions, static and instance methods with generics
+FunctionDeclaration ::= Attributes? ExternHeader? 'pub'? 'fn' identifier GenericParameters? Signature WhereConstraints? Block?
+
+Signature             ::= Parameters Result?
+Parameters            ::= '(' Parameter (',' Parameter)* ','? ')'
+Parameter             ::= 'mut'? identifier? '...'? Type ParameterDefaultValue?
+ParameterDefaultValue ::= '=' Expression
+Result                ::= '->' Type
+
+MethodDeclaration ::= Attributes? 'pub'? 'fn' '(' Receiver ')' identifier GenericParameters? Signature WhereConstraints? Block?
+// `mut a Foo` is forbidden
+Receiver ::= identifier Type
+
+StaticMethodDeclaration ::= Attributes? 'pub'? 'fn' identifier '.' identifier GenericParameters? Signature WhereConstraints? Block?
+
+// Structs, interfaces, enums and tests
+StructDeclaration     ::= Attributes? ExternHeader? 'pub'? 'struct' identifier GenericParameters? WhereConstraints? '{' FieldDeclaration* '}'
+FieldDeclaration      ::= Attributes? (PlainFieldDeclaration | EmbeddedDefinition) semi?
+PlainFieldDeclaration ::= identifier Type DefaultFieldValue?
+DefaultFieldValue     ::= '=' Expression
+EmbeddedDefinition    ::= identifier | RefType | QualifiedType | GenericType
+
+InterfaceDeclaration        ::= Attributes? 'pub'? 'interface' identifier GenericParameters? WhereConstraints? '{' InterfaceMember* '}'
+InterfaceMember             ::= (InterfaceMethodDefinition | InterfaceEmbeddedDefinition) semi?
+InterfaceMethodDefinition   ::= Attributes? 'fn' identifier GenericParameters? Signature WhereConstraints? Block?
+InterfaceEmbeddedDefinition ::= identifier | QualifiedType | GenericType
+
+EnumDeclaration         ::= Attributes? 'pub'? 'enum' identifier EnumBackedType? '{' EnumVariantDeclaration* '}'
+EnumBackedType          ::= 'as' Type
+EnumVariantDeclaration  ::= Attributes? identifier DefaultEnumVariantValue? semi?
+DefaultEnumVariantValue ::= '=' Expression
+
+TestDeclaration ::= Attributes? 'test' StringLiteral Block
+
+GenericParameters            ::= '[' GenericParameterList ']'
+GenericParameterList         ::= GenericParameter (',' GenericParameter)* ','?
+GenericParameter             ::= (PlainGenericParameter | ConstantGenericParameter) GenericParameterDefaultValue?
+GenericParameterDefaultValue ::= '=' Expression
+
+PlainGenericParameter    ::= identifier (':' Constraints)?
+ConstantGenericParameter ::= 'const' identifier 'as' Type
+
+WhereConstraints ::= semi? WhereClause semi?
+WhereClause      ::= 'where' semi? WhereClauseItem (',' WhereClauseItem)* ','?
+WhereClauseItem  ::= identifier ':' Constraints
+Constraints      ::= Type ('+' Type)*
+
+// Statements
+Statement ::=
+    ExpressionStatement
+  | VarDeclaration
+  | AssignStatement
+  | SendStatement
+  | ForStatement
+  | CompileTimeForStatement
+  | AssertStatement
+  | LabeledStatement
+  | DeferStatement
+  | IncDecStatement
+
+ExpressionStatement ::= Expression semi
+
+VarDeclaration    ::= VarDefinitionList ':=' Expression
+VarDefinitionList ::= VarDefinition (',' VarDefinition)*
+VarDefinition     ::= 'mut'? identifier
+
+AssignOp ::= '=' | '+=' | '-=' | '|=' | '^=' | '*=' | '/=' | '%=' | '<<=' | '>>=' | '>>>=' | '&=' | '&^='
+AssignStatement ::= Expression AssignOp Expression
+
+SendStatement ::= Channel '<-' Expression
+Channel       ::= Expression
+
+ForStatement           ::= 'for' (ForClause | RangeClause | Expression)? Block
+ForClause              ::= VarDeclaration? ';' Expression? ';' ForClausePostStatement?
+ForClausePostStatement ::= AssignStatement | IncDecStatement
+RangeClause            ::= VarDefinitionList 'in' Expression
+
+CompileTimeForStatement ::= '$for' (ForClause | RangeClause | Expression) Block
+
+AssertStatement ::= 'assert' Expression (',' Expression)?
+
+Label            ::= identifier ':'
+LabeledStatement ::= Label Statement?
+
+DeferStatement ::= 'defer' Expression
+
+IncDecStatement ::= Expression ('++' | '--')
+
+// Expressions
+
+Expression ::=
+    identifier
+  | comptime_identifier
+  | OrExpression
+  | AndExpression
+  | ConditionalExpression
+  | AddExpression
+  | MulExpression
+  | TakeAddrExpression
+  | UnaryExpression
+  | ReceiveExpression
+  | RangeExpression
+  | FunctionLiteral
+  | LambdaLiteral
+  | MatchExpression
+  | SelectExpression
+  | IfExpression
+  | CompileTimeIfExpression
+  | InExpression
+  | IsExpression
+  | AsExpression
+  | EnumFetchExpression
+  | UnpackingExpression
+  | MutExpression
+  | SpawnExpression
+  | ReturnExpression
+  | UnsafeExpression
+  | CompileTimeExpression
+  | BreakExpression
+  | ContinueExpression
+  | GotoExpression
+  | SelectorExpression
+  | SafeSelectorExpression
+  | CompileTimeSelectorExpression
+  | CallExpression
+  | IndexExpression
+  | OrBlockExpression
+  | OptionPropagationExpression
+  | ResultPropagationExpression
+  | TypeInitializer
+  | ListExpression
+  | Block
+  | TupleLiteral
+  | ArrayLiteral
+  | MapLiteral
+  | Literal
+  | ParenthesesExpression
+
+OrExpression  ::= Expression '||' Expression
+AndExpression ::= Expression '&&' Expression
+
+RelOp ::= '==' | '!=' | '<' | '<=' | '>' !'>' | '>='
+ConditionalExpression ::= Expression RelOp Expression
+
+AddOp ::= '+' | '-' | '|' | '^'
+AddExpression ::= Expression AddOp Expression
+
+MulOp ::= '*' | '/' | '%' | '<<' | '>>' | '>>>' | '&' | '&^'
+MulExpression ::= Expression MulOp Expression
+
+TakeAddrExpression ::= ('&' | '&mut') Expression
+
+UnaryOp ::= '+' | '-' | '!' | '^' | '~' | '*'
+UnaryExpression ::= UnaryOp Expression
+
+ReceiveExpression ::= '<-' Expression
+
+RangeExpression     ::= Expression? ('..' | '..=') Expression? RangeStepExpression?
+RangeStepExpression ::= 'step' Expression
+
+FunctionLiteral ::= 'fn' GenericParameters? Signature WhereConstraints? Block
+
+LambdaLiteral        ::= LambdaSignature Expression
+LambdaSignature      ::= LambdaParameters ('->' Type)?
+LambdaParameters     ::= '||' | ('|' LambdaParametersList? '|')
+LambdaParametersList ::= LambdaParameter (',' LambdaParameter)*
+LambdaParameter      ::= 'mut'? identifier '...'? Type?
+
+MatchExpression        ::= 'match' Expression? '{' MatchArm* MatchElseArm? '}'
+MatchArm               ::= MatchArmExpressionList '=>' MatchArmBody (',' | semi)?
+MatchArmExpressionList ::= MatchArmExpression (',' MatchArmExpression)*
+MatchArmExpression     ::= Expression | Type
+MatchArmBody           ::= Expression | Block
+MatchElseArm           ::= 'else' '=>' MatchArmBody (',' | semi)?
+
+SelectExpression   ::= 'select' '{' SelectArm* SelectElseArm? '}'
+SelectArm          ::= SelectArmStatement '=>' SelectArmBody (',' | semi)?
+SelectArmStatement ::= VarDeclaration | AssignStatement | SendStatement | Expression
+SelectArmBody      ::= Expression | Block
+SelectElseArm      ::= 'else' '=>' SelectArmBody (',' | semi)?
+
+IfExpression ::= 'if' Condition Block ElseBranch?
+Condition    ::= VarDeclaration | Expression
+ElseBranch   ::= IfExpression | ('else' Block)
+
+CompileTimeIfExpression ::= '$if' Condition Block CompileTimeElseBranch?
+CompileTimeElseBranch   ::= '$else' (CompileTimeIfExpression | Block)
+
+InExpression ::= Expression ('in' | '!in') Expression
+IsExpression ::= Expression ('is' | '!is') Type
+AsExpression ::= Expression ('as' | 'as?') Type
+
+EnumFetchExpression ::= '.' identifier
+
+UnpackingExpression ::= '...' Expression
+
+MutExpression         ::= 'mut' Expression
+SpawnExpression       ::= 'spawn' Expression
+ReturnExpression      ::= 'return' Expression?
+UnsafeExpression      ::= 'unsafe' Block
+CompileTimeExpression ::= 'comptime' Expression
+BreakExpression       ::= 'break' identifier?
+ContinueExpression    ::= 'continue' identifier?
+GotoExpression        ::= 'goto' identifier
+
+SelectorExpression            ::= Expression '.' identifier
+SafeSelectorExpression        ::= Expression '?.' identifier
+CompileTimeSelectorExpression ::= Expression '.' '$(' Expression ')'
+
+CallExpression ::= Expression GenericArguments? '(' ArgumentList? ')'
+ArgumentList   ::= Argument (',' Argument)* ','?
+Argument       ::= Expression | NamedArgument
+NamedArgument  ::= identifier ':' Expression
+
+GenericArguments ::= '[' TypeList ']'
+
+IndexExpression ::= Expression '[' Expression ']'
+
+OrBlockExpression ::= Expression 'or' Block
+
+OptionPropagationExpression ::= Expression '?'
+ResultPropagationExpression ::= Expression '!'
+
+TypeInitializer     ::= TypeInitializerType '{' UnpackingExpression? KeyValue* '}'
+TypeInitializerType ::= ArrayType | FixedSizeArrayType | MapType |
+                        ChannelType | identifier | QualifiedType |
+                        GenericType
+KeyValue            ::= identifier ':' Expression
+
+ListExpression ::= Expression (',' Expression)* ','?
+
+Block ::= '{' Statement* '}'
+
+TupleLiteral ::= '(' ListExpression? ')'
+
+ArrayLiteral ::= '[' ListExpression? ']'
+
+MapLiteral  ::= '{' MapKeyValue* '}'
+MapKeyValue ::= Expression ':' Expression
+
+Literal ::=
+    int_lit
+  | hex_lit
+  | octal_lit
+  | binary_lit
+  | float_lit
+  | rune
+  | bool_lit
+  | NoneLiteral
+  | NilLiteral
+  | StringLiteral
+
+NilLiteral  ::= 'nil'
+NoneLiteral ::= 'none'
+
+StringLiteral ::= 'raw_string' | StringTemplate
+
+quote ::= '"' | "'"
+StringTemplate ::= quote StringTemplatePart* quote
+
+StringTemplatePart ::=
+    LITERAL_STRING_TEMPLATE_ENTRY
+  | LITERAL_STRING_TEMPLATE_ESCAPE_ENTRY
+  | StringTemplateEntry
+
+StringTemplateEntry ::= '${' Expression '}'
+
+ParenthesesExpression ::= '(' Expression ')'
+
+// Types
+
+Type ::=
+    identifier
+  | QualifiedType
+  | GenericType
+  | ArrayType | FixedSizeArrayType
+  | MapType
+  | TupleType
+  | RefType | PointerType
+  | OptionType
+  | ResultType
+  | FunctionType
+  | ChannelType
+  | LiteralType
+
+QualifiedType      ::= identifier '.' identifier
+GenericType        ::= (identifier | QualifiedType) GenericArguments?
+ArrayType          ::= '[' ']' Type
+FixedSizeArrayType ::= '[' Expression ']' Type
+MapType            ::= 'map[' Type ']' Type
+TypeList           ::= Type (',' Type)* ','?
+TupleType          ::= '(' ')' | '(' Type ',' TypeList ')'
+RefType            ::= ('&' | '&mut ') Type
+PointerType        ::= ('*' | '*mut ') Type
+OptionType         ::= '?' Type
+ResultType         ::= '!' (Type | ('[' Type (',' Type)? ']'))?
+FunctionType       ::= 'fn' Signature
+ChannelType        ::= 'chan' Type
+LiteralType        ::= Literal
+
+// Next rules are used to define lexing rules
+
+// semi is automatically inserted semi-colon, explicit semi-colon or end of file
+semi ::= '<NL>' | ';' | <<eof>>
+
+shebang ::= '#!' shebang_value '<NL>'
+shebang_value ::= "[^<NL>]*"
+
+identifier ::= letter (letter | digit)*
+
+comptime_identifier ::= '$' identifier
+
+// integer literals in decimal, binary, octal and hexadecimal format
+decimal_digit ::= "0" to "9"
+binary_digit  ::= "0" | "1"
+octal_digit   ::= "0" to "7"
+hex_digit     ::= "0" to "9" | "A" to "F" | "a" to "f"
+
+int_lit        ::= decimal_lit | binary_lit | octal_lit | hex_lit
+decimal_lit    ::= "0" | ( "0" to "9" ) ( "_"? decimal_digits )?
+binary_lit     ::= "0" ( "b" | "B" ) "_"? binary_digits
+octal_lit      ::= "0" ( "o" | "O" ) "_"? octal_digits
+hex_lit        ::= "0" ( "x" | "X" ) "_"? hex_digits
+
+decimal_digits ::= decimal_digit ( "_"? decimal_digit )*
+binary_digits  ::= binary_digit ( "_"? binary_digit )*
+octal_digits   ::= octal_digit ( "_"? octal_digit )*
+hex_digits     ::= hex_digit ( "_"? hex_digit )*
+
+// float literals in decimal and hexadecimal format
+float_lit         ::= decimal_float_lit | hex_float_lit
+
+decimal_float_lit ::= decimal_digits "." decimal_digits? decimal_exponent? |
+                      decimal_digits decimal_exponent |
+                      "." decimal_digits decimal_exponent?
+decimal_exponent  ::= ( "e" | "E" ) ( "+" | "-" )? decimal_digits
+
+hex_float_lit     ::= "0" ( "x" | "X" ) hex_mantissa hex_exponent
+hex_mantissa      ::= "_"? hex_digits "." hex_digits? |
+                      "_"? hex_digits |
+                      "." hex_digits
+hex_exponent      ::= ( "p" | "P" ) ( "+" | "-" )? decimal_digits
+
+// boolean literals
+bool_lit ::= 'true' | 'false'
+
+
+// TODO:
+//  - define rune literals
+//  - define raw strings
+//
+// Compiler
+// - Signature with only types is not supported
+// - Atomic types is not supported
+// - EmbeddedDefinition with RefType is not supported
+// - '>>>=' and '&^=' are not supported
+// - '>>>' is not supported
+// - ResultType is not fully matched
+// - ModuleClause is still allowed to be optional
+// - ParameterDefaultValue is not supported
+// - GenericParameters for FunctionLiteral is not supported
+//
+// IntelliJ Plugin
+// - int_lit is not fully supported
+//
+// Tree-Sitter
+// - unnamed and named parameters in single signature is not supported
